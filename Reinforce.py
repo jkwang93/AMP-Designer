@@ -17,8 +17,6 @@ from utils import calculate_likelihood_loss, top_k_top_p_filtering, unique, deco
 from pytorchtools import EarlyStopping
 from soft_prompt_embedding import SoftEmbedding
 
-'''没有将end后面的token去掉'''
-
 
 def setup_args():
     parser = argparse.ArgumentParser()
