@@ -127,7 +127,7 @@ if __name__ == '__main__':
 
     # Agent.transformer.wte.learned_embedding.requires_grad = False
     optimizer = torch.optim.Adam(Student.rnn.parameters(), lr=args.lr)
-    soft_criterion = torch.nn.MSELoss()
+    soft_criterion = torch.nn.KLDivLoss()
 
     for step in range(n_steps):
         # Sample from Agent
