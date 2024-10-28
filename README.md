@@ -1,4 +1,7 @@
-# Discovery of novel antimicrobial peptides with notable antibacterial potency by a LLM-based foundation model
+<p align="justify">
+Discovery of novel antimicrobial peptides with notable antibacterial potency by a LLM-based foundation model
+</p>
+
 <div align=center>
 <img src="./workflow.png" width="80%" height="80%" alt="TOC" align=center />
 </div>
