@@ -250,17 +250,16 @@ def prompt_contrast_train(args, model, train_dataset):
 
             epoch_loss_list.append(loss.cpu().detach().numpy())
 
-            if batch_steps % 1000 == 0 and batch_steps <= 100000:
-                # Save model checkpoint
-                output_dir = os.path.join(args.save_model_path, "checkpoint-{}".format(batch_steps))
-                if not os.path.exists(output_dir):
-                    os.makedirs(output_dir)
-                model_to_save = (
-                    model.module if hasattr(model, "module") else model
-                )  # Take care of distributed/parallel training
-                model_to_save.save_pretrained(output_dir)
-                tokenizer.save_pretrained(output_dir)
-                model_to_save.save_pretrained(os.path.join(output_dir, "training_args.bin"))
+            # Save model checkpoint
+            output_dir = os.path.join(args.save_model_path, "checkpoint-{}".format(batch_steps))
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            model_to_save = (
+                model.module if hasattr(model, "module") else model
+            )  # Take care of distributed/parallel training
+            model_to_save.save_pretrained(output_dir)
+            tokenizer.save_pretrained(output_dir)
+            model_to_save.save_pretrained(os.path.join(output_dir, "training_args.bin"))
 
         epoch_loss = np.mean(epoch_loss_list)
         early_stopping(epoch_loss, model, args.save_model_path)
