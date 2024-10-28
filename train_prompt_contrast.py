@@ -277,7 +277,7 @@ def setup_args():
     parser.add_argument('--train_raw_path', default='train_raw_data.txt', type=str, help='')
     parser.add_argument('--eval_raw_path', default='test_raw_data.txt', type=str, help='')
     parser.add_argument('--batch_size', default=256, type=int, required=False, help='batch size')
-    parser.add_argument('--epochs', default=10001, type=int, required=False, help='epochs')
+    parser.add_argument('--epochs', default=200, type=int, required=False, help='epochs')
     parser.add_argument('--warmup_steps', default=500, type=int, required=False, help='warm up steps')
     parser.add_argument('--lr', default=1e-4, type=float, required=False, help='learn rate')
     parser.add_argument('--max_grad_norm', default=1.0, type=float, required=False)
@@ -301,23 +301,15 @@ def setup_args():
 
 if __name__ == '__main__':
     args = setup_args()
-    args.model_path, args.vocab_path = '', '../hugging_face_test/my_token/vocab.txt'
-    args.train_raw_path = '../data/contrast_data/contrast_training_data.csv'
-
-    # args.batch_size = 16
+    args.model_path, args.vocab_path = '', './voc/vocab.txt'
+    args.train_raw_path = '../data/prompt_data/'
+    
     initialize_from_vocab = False
-
     tokenizer = BertTokenizer(vocab_file=args.vocab_path)
-
-    model = GPT2LMHeadModel.from_pretrained('../hugging_face_test/best_save_model')
-
-
+    model = GPT2LMHeadModel.from_pretrained('./')
     s_wte = SoftEmbedding(model.get_input_embeddings(),
                           n_tokens=args.n_tokens,
                           initialize_from_vocab=initialize_from_vocab)
-
     model.set_input_embeddings(s_wte)
-
     train_dataloader = load_and_cache_examples(args, args.train_raw_path, tokenizer=tokenizer)
-
     prompt_contrast_train(args, model, train_dataloader)
