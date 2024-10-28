@@ -17,9 +17,6 @@ from utils import calculate_likelihood_loss, top_k_top_p_filtering, unique, deco
 from early_stop.pytorchtools import EarlyStopping
 from soft_prompt_embedding import SoftEmbedding
 
-'''没有将end后面的token去掉'''
-
-
 def setup_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', default=64, type=int, required=False, help='batch size')
@@ -112,8 +109,8 @@ if __name__ == '__main__':
 
     args = setup_args()
     n_steps = args.n_steps
-    args.model_bin_path, args.vocab_path = '../soft_prompt/random_prompt_n_tokens/pytorch_model.bin', '../hugging_face_test/my_token/vocab.txt'
-    args.model_path = '../soft_prompt/random_prompt_n_tokens'
+    args.model_bin_path, args.vocab_path = './model_ckpt/pytorch_model.bin', '../voc/vocab.txt'
+    args.model_path = './model_ckpt/'
 
     tokenizer = BertTokenizer(vocab_file=args.vocab_path)
 
