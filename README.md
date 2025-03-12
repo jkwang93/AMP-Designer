@@ -15,7 +15,7 @@ scipy == 1.10.0
 ```
 
 ## Pretrained Model
-The weight and configuration files of pre-trained model can be found in [Zenedo](https://zenodo.org/records/13999508).
+The weight and configuration files of pre-trained model can be found in [Zenedo](https://zenodo.org/records/15012824).
 
 ## Generation
 AMP_GPT_generator.py can be used for generation. 
