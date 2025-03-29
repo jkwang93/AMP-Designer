@@ -288,7 +288,7 @@ def setup_args():
     parser.add_argument('--sup_data_num', default=0, type=int, help='the number of supervised data for each prefix')
     parser.add_argument("--balanced", action="store_true", help="use balanced dataset for training")
     parser.add_argument("--dropout", default=0.1, type=float, help="dropout prob")
-    parser.add_argument("--gen_weight", default=0.8, type=float, help="scalar multiple for generative loss (lambda)")
+    parser.add_argument("--gen_weight", default=0.9, type=float, help="scalar multiple for generative loss (lambda)")
 
     parser.add_argument("--logit_scale", action="store_true", help="learns to scale logits for classification")
     parser.add_argument("--threeway", action="store_true", help="does 3-way classification")
