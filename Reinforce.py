@@ -13,7 +13,7 @@ import time
 from Bio.SeqUtils import ProtParam
 from transformers import BertTokenizer
 
-from Distillation.regression_predictor.regression_lstm_predict import Predict
+import Predict
 from Distillation.utils import decode, compute_peptides_similarity
 from macrel_predictor.predictor import macrel_predictor
 from reinforce_model_rnn import RNN
