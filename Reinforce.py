@@ -1,176 +1,202 @@
+#!/usr/bin/env python
+import argparse
 import gzip
 import pickle
-import time
-import torch
-import argparse
-import numpy as np
-
-from transformers import BertTokenizer
-import torch.nn.functional as F
-
-from utils import calculate_likelihood_loss, unique, decode, prompt_model_loader, Variable, NLLLoss
-from macrel_predictor.predictor import macrel_predictor
-
 import warnings
+
+import torch
+
+import numpy as np
+import pandas as pd
+import time
+
+from Bio.SeqUtils import ProtParam
+from transformers import BertTokenizer
+
+from Distillation.regression_predictor.regression_lstm_predict import Predict
+from Distillation.utils import decode, compute_peptides_similarity
+from macrel_predictor.predictor import macrel_predictor
+from reinforce_model_rnn import RNN
+from MCMG_utils.data_structs import Vocabulary, Experience
+from utils import Variable, unique
+
 warnings.filterwarnings("ignore")
-def setup_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--batch_size', default=64, type=int, required=False, help='batch size')
-    parser.add_argument('--lr', default=1e-5, type=float, required=False, help='learn rate')
-    # parser.add_argument('--max_grad_norm', default=1.0, type=float, required=False)
-    parser.add_argument('--top_k', default=10, type=int, required=False, help='top k sampling')
-    parser.add_argument('--top_p', default=1.0, type=float, required=False, help='')
-    parser.add_argument('--sigma', default=300, type=float, required=False, help='the weight of score')
-    parser.add_argument('--n_steps', default=5000, type=float, required=False, help='the weight of score')
-    parser.add_argument('--n_tokens', default=10, type=int, required=False, help='soft embedding')
-    return parser.parse_args()
+import os
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
-def get_score(macrel_model,predicted_list,seqs_len):  # predicted will be the list of predicted token
-    # seq_list = []
-    # for index, eachseq in enumerate(predicted_list):
-    #     seq = "".join(list(eachseq)).replace('[SEP]', '')
-    #     seq = seq.upper()
-    #     seq.replace('  ', '')
-    #     seq_list.append(seq)
-    '''if len samll than 9, make reward=0'''
-    reward_bool = (np.array(seqs_len)>9)
+def compute_charge(seq_list):
     try:
-        reward = macrel_predictor(predicted_list, macrel_model)
-        reward = reward * reward_bool
+        charge_list = []
+        for peptide_seq in seq_list:
+            len_peptide = len(peptide_seq)
+            params = ProtParam.ProteinAnalysis(peptide_seq)
+            peptide_charge = round(params.charge_at_pH(pH=7.4), 2)
+            charge_list.append(peptide_charge/len_peptide)
+        return charge_list
     except Exception as e:
-        reward = np.zeros(len(reward_bool))
+        return 0
 
+def get_similarity(seq_list1, seq_list2):
+    try:
+        sim_list = []
+        for i in seq_list1:
+            single_sim_list = []
+            for j in seq_list2:
+                sim_score = compute_peptides_similarity(i, j)
+                single_sim_list.append(sim_score)
+            sim_list.append(max(single_sim_list))
+        return 1-np.mean(sim_list)
+    except Exception as e:
+        return 0
+
+def get_score_bins(Saure_predict, Ecoli_predict, Paer_predict, macrel_model, predicted_list,
+                   seqs_len, memory):  # predicted will be the list of predicted token
+    '''if len samll than 6, make reward=0'''
+    bins = np.linspace(0, 1, 11) 
+
+    regression_bins = np.array([0, 10, 15, 20, 30, 50, 60, 100, 150, 250, 8156])
+    regression_bins = np.log10(regression_bins)
+    regression_bins[0] = -100
+
+    try:
+        macrel_reward = macrel_predictor(predicted_list, macrel_model)
+        Saure_predict_regression_reward = Saure_predict.lstm_preidct(predicted_list)
+        Ecoli_predict_regression_reward = Ecoli_predict.lstm_preidct(predicted_list)
+        Paer_predict_regression_reward = Paer_predict.lstm_preidct(predicted_list)
+
+        # digitize
+        macrel_reward_bin = np.digitize(macrel_reward, bins)  # 返回值为每个值所属区间的索引。
+        Saure_predict_regression_reward_bin = 10 - np.digitize(Saure_predict_regression_reward, regression_bins)
+        Ecoli_predict_regression_reward_bin = 10 - np.digitize(Ecoli_predict_regression_reward, regression_bins)
+        Paer_predict_regression_bin = 10 - np.digitize(Paer_predict_regression_reward, regression_bins)
+
+        # similarity
+        charge = compute_charge(predicted_list)
+
+        reward = macrel_reward_bin * 0.1 + (
+                Saure_predict_regression_reward_bin + Ecoli_predict_regression_reward_bin + Paer_predict_regression_bin) * 0.1 + np.mean(charge)
+   
+    except Exception as e:
+        print(e)
+        reward = np.zeros(len(seqs_len))
+        macrel_reward = np.zeros(len(seqs_len))
+        Saure_predict_regression_reward = np.zeros(len(seqs_len))
+        Ecoli_predict_regression_reward = np.zeros(len(seqs_len))
+        Paer_predict_regression_reward = np.zeros(len(seqs_len))
+
+    return reward, macrel_reward, Saure_predict_regression_reward, Ecoli_predict_regression_reward, Paer_predict_regression_reward,charge
+
+
+def get_score(predict, macrel_model, predicted_list, seqs_len):  # predicted will be the list of predicted token
+    len_alpha = 0.05
+    try:
+        macrel_reward = macrel_predictor(predicted_list, macrel_model)
+        regression_reward = predict.lstm_preidct(predicted_list)
+
+        reward = macrel_reward - regression_reward - len_alpha * np.array(seqs_len)
+
+    except Exception as e:
+        print(e)
+        reward = np.zeros(len(seqs_len))
     return reward
 
 
-def likelihood(args, model, batch, tokenizer):
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    model.to(device)
-    model.eval()
-
-    start_token = ''
-    start_token = tokenizer.encode(start_token)
-    prompt_tokens = list(range(100, 100 + 10))
-    input_each = prompt_tokens + [start_token[0]]
-
-    # end_each_batch = torch.Tensor([start_token[1]]).long().repeat(len(batch), 1).to(device)
-
-    input_each_batch = torch.Tensor(input_each).long().repeat(len(batch), 1).to(device)
-
-    input_tensor = torch.cat([input_each_batch, batch], dim=1)
-
-    inputs = {"input_ids": input_tensor.to(device)}
-    outputs = model(**inputs)
-    loss = calculate_likelihood_loss(outputs, input_tensor, device, tokenizer, n_tokens=args.n_tokens)
-    return loss
-
-
-def sample(args, model, tokenizer, batch_size, text=""):
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    # model, _ = load_model(args.save_model_path, args.vocab_path)
-
-    model.to(device)
-    model.eval()
-    time1 = time.time()
-    max_length = 34
-
-    input_ids = list(range(100, 100 + 10))
-
-    input_ids.extend(tokenizer.encode(text))
-
-    input_ids = input_ids[:11]
-
-    input_tensor = torch.zeros(batch_size, 11).long()
-
-    for index, i in enumerate(input_ids):
-        input_tensor[:, index] = input_ids[index]
-
-
-    finished = torch.zeros(batch_size, 1).byte().to(device)
-
-    log_probs = Variable(torch.zeros(batch_size))
-    sequences = []
-    for i in range(max_length):
-        # input_tensor = torch.tensor([input_ids])
-        inputs = {"input_ids": input_tensor.to(device)}
-        try:
-            outputs = model(**inputs)
-        except Exception as e:
-            print(e)
-
-        logits = outputs.logits
-
-        prob = F.softmax(logits[:, -1, :])
-
-        log_prob = F.log_softmax(logits[:, -1, :], dim=1)
-
-        last_token_id = torch.multinomial(prob, 1)
-        sequences.append(last_token_id.view(-1, 1))
-
-        loss = NLLLoss(log_prob.view(-1, log_prob.size(-1)), last_token_id.view(-1))
-
-        log_probs += loss
-
-        # .detach().to('cpu').numpy()
-        EOS_sampled = (last_token_id == tokenizer.sep_token_id)
-        finished = torch.ge(finished + EOS_sampled, 1)
-        if torch.prod(finished) == 1:
-            # print('End')
-            break
-
-        # last_token = tokenizer.convert_ids_to_tokens(last_token_id)
-        input_tensor = torch.cat((input_tensor, last_token_id.detach().to('cpu')), 1)
-        # Seq_list.append(last_token)
-    sequences = torch.cat(sequences, 1)
-    # sequences = sequences.detach()
-    # Seq_list = np.array(Seq_list).T
-    return sequences.data, log_probs
-
-
-
-if __name__ == '__main__':
-    # set_seed(42)
-    start_time = time.time()
-
-    '''add your preditor'''
-    macrel_model_path = "./macrel_predictor/data/models/AMP.pkl.gz"
+def train_agent(restore_prior_from='./ckpt/best_checkpoint.pt',
+                restore_agent_from='./ckpt/best_checkpoint.pt', agent_save='./',
+                batch_size=64, n_steps=5000, sigma=60, save_dir='./MCMG_results/',
+                experience_replay=1):
+    '''predictor'''
+    macrel_model_path = "../PPO/macrel_predictor/data/models/AMP.pkl.gz"
     macrel_model = pickle.load(gzip.open(macrel_model_path, 'rb'))
 
-    args = setup_args()
-    n_steps = args.n_steps
-    args.model_bin_path, args.vocab_path = './', './'
-    args.model_path = '../'
+    voc = BertTokenizer('../hugging_face_test/my_token/vocab.txt')
 
-    tokenizer = BertTokenizer(vocab_file=args.vocab_path)
+    start_time = time.time()
 
-    Prior = prompt_model_loader(args.model_bin_path, args.model_path)
-    Agent = prompt_model_loader(args.model_bin_path, args.model_path)
+    Prior = RNN(voc)
+    Agent = RNN(voc)
+
+    # By default restore Agent to same model as Prior, but can restore from already trained Agent too.
+    # Saved models are partially on the GPU, but if we dont have cuda enabled we can remap these
+    # to the CPU.
+    if torch.cuda.is_available():
+        Prior.rnn.load_state_dict(torch.load(restore_prior_from, map_location={'cuda:0': 'cuda:0'}))
+        Agent.rnn.load_state_dict(torch.load(restore_agent_from))
+    else:
+        Prior.rnn.load_state_dict(torch.load(restore_prior_from, map_location=lambda storage, loc: storage))
+        Agent.rnn.load_state_dict(torch.load(restore_agent_from, map_location=lambda storage, loc: storage))
 
     # We dont need gradients with respect to Prior
-    for param in Prior.parameters():
+    for param in Prior.rnn.parameters():
         param.requires_grad = False
 
-    # Agent.transformer.wte.learned_embedding.requires_grad = False
-    optimizer = torch.optim.Adam(Agent.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(Agent.rnn.parameters(), lr=0.0001)
+
+    experience = Experience(voc)
+
+    print("Model initialized, starting training...")
+
+    # Scoring_function
+    Saure_predict = Predict("")
+    Ecoli_predict = Predict("")
+    Paer_predict = Predict("")
 
     for step in range(n_steps):
+        save_peptides = []
+        save_score = []
+        Ecoli_predict_regression_list = []
+        Saure_predict_regression_list = []
+        Paer_predict_regression_list = []
+        charge_reward_list = []
+
+        classification_score = []
+
         # Sample from Agent
-        seqs, agent_likelihood = sample(args, Agent, tokenizer, batch_size=args.batch_size)
+        seqs, agent_likelihood, entropy = Agent.sample(batch_size=batch_size)
 
         # Remove duplicates, ie only consider unique seqs
         unique_idxs = unique(seqs)
         seqs = seqs[unique_idxs]
         agent_likelihood = agent_likelihood[unique_idxs]
+        entropy = entropy[unique_idxs]
 
         # Get prior likelihood and score
-        prior_likelihood = likelihood(args, Prior, Variable(seqs), tokenizer)
-        peptides,seqs_len = decode(seqs, tokenizer)
+        prior_likelihood = Prior.likelihood(Variable(seqs))
+        peptides, seqs_len = decode(seqs, voc)
 
-        score = get_score(macrel_model,peptides, seqs_len)
+        save_peptides.extend(peptides)
+
+        memory = experience.output_memory()
+        score, classification_reward, Saure_predict_regression_reward, Ecoli_predict_regression_reward, Paer_predict_regression_reward,charge_reward = get_score_bins(
+            Saure_predict, Ecoli_predict, Paer_predict, macrel_model, peptides, seqs_len, memory)
+
+        charge_reward_list.extend(charge_reward)
+        save_score.extend(score)
+        Saure_predict_regression_list.extend(Saure_predict_regression_reward)
+        Ecoli_predict_regression_list.extend(Ecoli_predict_regression_reward)
+        Paer_predict_regression_list.extend(Paer_predict_regression_reward)
+        classification_score.extend(classification_reward)
+
         # Calculate augmented likelihood
-        augmented_likelihood = prior_likelihood + args.sigma * Variable(score)
+        augmented_likelihood = prior_likelihood + sigma * Variable(score)
+
         loss = torch.pow((augmented_likelihood - agent_likelihood), 2)
+
+        # Experience Replay
+        # First sample
+        if experience_replay and len(experience) > 4:
+            exp_seqs, exp_score, exp_prior_likelihood = experience.sample(4)
+            exp_agent_likelihood, exp_entropy = Agent.likelihood(exp_seqs.long())
+            exp_augmented_likelihood = exp_prior_likelihood + sigma * exp_score
+            exp_loss = torch.pow((Variable(exp_augmented_likelihood) - exp_agent_likelihood), 2)
+            loss = torch.cat((loss, exp_loss), 0)
+            agent_likelihood = torch.cat((agent_likelihood, exp_agent_likelihood), 0)
+        # Then add new experience
+        prior_likelihood = prior_likelihood.data.cpu().numpy()
+        new_experience = zip(peptides, score, prior_likelihood)
+        experience.add_experience(new_experience)
+
         # Calculate loss
         loss = loss.mean()
 
@@ -185,19 +211,54 @@ if __name__ == '__main__':
 
         # Convert to numpy arrays so that we can print them
         augmented_likelihood = augmented_likelihood.data.cpu().numpy()
-        prior_likelihood = prior_likelihood.data.cpu().numpy()
-
         agent_likelihood = agent_likelihood.data.cpu().numpy()
 
+        if step % 100 == 0 and step != 0:
+            torch.save(Agent.rnn.state_dict(), agent_save)
+        print(loss)
         # Print some information for this step
         time_elapsed = (time.time() - start_time) / 3600
         time_left = (time_elapsed * ((n_steps - step) / (step + 1)))
-        print("\n       Step {}   Average score: {:6.2f}  Time elapsed: {:.2f}h Time left: {:.2f}h".format(
+        print("\n       Step {}   Mean score: {:6.2f}  Time elapsed: {:.2f}h Time left: {:.2f}h".format(
             step, np.mean(score), time_elapsed, time_left))
-        print("  Agent    Prior   Target   Score             Peptides")
+        print("  Agent    Prior   Target   Score             SMILES")
+        save_score = pd.DataFrame(save_score)
+        save_peptides = pd.DataFrame(save_peptides)
+
+        classification_score = pd.DataFrame(classification_score)
+        charge_reward_list = pd.DataFrame(charge_reward_list)
+        Saure_predict_regression_list = pd.DataFrame(Saure_predict_regression_list)
+        Ecoli_predict_regression_list = pd.DataFrame(Ecoli_predict_regression_list)
+        Paer_predict_regression_list = pd.DataFrame(Paer_predict_regression_list)
+
+        pd.concat([save_peptides, classification_score, Saure_predict_regression_list, Ecoli_predict_regression_list,
+                   Paer_predict_regression_list, charge_reward_list, save_score], axis=1).to_csv(
+            'generated_data/RL_sequence_step_figure.csv', index=False, header=False, mode='a')
         for i in range(10):
             print(" {:6.2f}   {:6.2f}  {:6.2f}  {:6.2f}     {}".format(agent_likelihood[i],
                                                                        prior_likelihood[i],
                                                                        augmented_likelihood[i],
                                                                        score[i],
                                                                        peptides[i]))
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Main script for running the model")
+    parser.add_argument('--num-steps', action='store', dest='n_steps', type=int,
+                        default=5000)
+    parser.add_argument('--batch-size', action='store', dest='batch_size', type=int,
+                        default=1000)
+    parser.add_argument('--sigma', action='store', dest='sigma', type=int,
+                        default=300)
+    # parser.add_argument('--middle', action='store', dest='restore_prior_from',
+    #                     default='checkpoint.pt',
+    #                     help='Path to an RNN checkpoint file to use as a Prior')
+    parser.add_argument('--agent', action='store', dest='agent_save',
+                        default='agent_checkpoint.pt',
+                        help='Path to an RNN checkpoint file to use as a Agent.')
+    parser.add_argument('--save-file-path', action='store', dest='save_dir',
+                        help='Path where results and model are saved. Default is data/results/run_<datetime>.')
+
+    arg_dict = vars(parser.parse_args())
+
+    train_agent(**arg_dict)
