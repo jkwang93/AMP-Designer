@@ -104,13 +104,13 @@ def get_score(predict, macrel_model, predicted_list, seqs_len):  # predicted wil
 
 def train_agent(restore_prior_from='./ckpt/best_checkpoint.pt',
                 restore_agent_from='./ckpt/best_checkpoint.pt', agent_save='./',
-                batch_size=64, n_steps=5000, sigma=60, save_dir='./MCMG_results/',
+                batch_size=64, n_steps=5000, sigma=60, save_dir='./',
                 experience_replay=1):
     '''predictor'''
-    macrel_model_path = "../PPO/macrel_predictor/data/models/AMP.pkl.gz"
+    macrel_model_path = "AMP.pkl.gz"
     macrel_model = pickle.load(gzip.open(macrel_model_path, 'rb'))
 
-    voc = BertTokenizer('../hugging_face_test/my_token/vocab.txt')
+    voc = BertTokenizer('vocab.txt')
 
     start_time = time.time()
 
