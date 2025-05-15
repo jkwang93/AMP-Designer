@@ -24,4 +24,14 @@ AMP_GPT_generator.py can be used for generation.
 The weight and configuration files of pre-trained model can be found in [Zenedo](https://zenodo.org/records/15012824).
 
 ## Cite
-If you find this work interesting, please cite [Jike Wang et al. ,Discovery of antimicrobial peptides with notable antibacterial potency by an LLM-based foundation model.Sci. Adv.11,eads8932(2025).DOI:10.1126/sciadv.ads8932](https://www.science.org/doi/10.1126/sciadv.ads8932).
+If you find this work interesting, please cite 
+[@article{wang2025discovery,
+  title={Discovery of antimicrobial peptides with notable antibacterial potency by an LLM-based foundation model},
+  author={Wang, Jike and Feng, Jianwen and Kang, Yu and Pan, Peichen and Ge, Jingxuan and Wang, Yan and Wang, Mingyang and Wu, Zhenxing and Zhang, Xingcai and Yu, Jiameng and others},
+  journal={Science Advances},
+  volume={11},
+  number={10},
+  pages={eads8932},
+  year={2025},
+  publisher={American Association for the Advancement of Science}
+}](https://www.science.org/doi/10.1126/sciadv.ads8932).
