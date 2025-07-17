@@ -15,7 +15,7 @@ scipy == 1.10.0
 ```
 
 ## Overview
-train_AMP_GPT.py is the training code for pretrained model, train_prompt_contrast.py is the training code for AMP-Prompt model, train_distilation.py is the training code for AMP-Distillation model and the AMP-MIC/AMP-MIC.py is the code for predict MIC.
+The train_AMP_GPT.py is the training code for pretrained model, train_prompt_contrast.py is the training code for AMP-Prompt model, train_distilation.py is the training code for AMP-Distillation model and the AMP-MIC/AMP-MIC.py is the code for predict MIC.
 
 ## Pretrained Model
 The weight and configuration files of pre-trained model can be found in [Zenedo](https://zenodo.org/records/15012824).
